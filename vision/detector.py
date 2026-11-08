@@ -95,6 +95,7 @@ def main():
     last_stream_frame_time = 0.0
     proximity_near = False
     strobe_active = False
+    scan_pending_after_strobe = False
     preview_server = None
 
     bridge = None
@@ -194,6 +195,13 @@ def main():
                                 strobe_active = False
                                 # Firmware sends its physical angle next.
                                 servo_angle_known = False
+                                if scan_pending_after_strobe:
+                                    print(
+                                        "[TRACKING] Strobe finished; "
+                                        "resuming deferred scan"
+                                    )
+                                    send_arduino_command("SERVO_SCAN")
+                                    scan_pending_after_strobe = False
                             continue
                         if reading.get("sensor") != "ultrasonic":
                             continue
@@ -252,7 +260,10 @@ def main():
                         candidate_track_id = None
                         candidate_lost_frames = 0
                         servo_angle_known = False
-                        send_arduino_command("SERVO_SCAN")
+                        if strobe_active:
+                            scan_pending_after_strobe = True
+                        else:
+                            send_arduino_command("SERVO_SCAN")
 
                 if candidate_track_id is None:
                     hold_candidates = [
@@ -332,7 +343,10 @@ def main():
                         target_lost_frames = 0
                         smoothed_target_center_x = None
                         servo_angle_known = False
-                        send_arduino_command("SERVO_SCAN")
+                        if strobe_active:
+                            scan_pending_after_strobe = True
+                        else:
+                            send_arduino_command("SERVO_SCAN")
                 continue
 
             target_lost_frames = 0
