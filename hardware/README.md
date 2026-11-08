@@ -65,8 +65,10 @@ TRIGGER_STROBE
 
 The firmware boots with Jetson control offline, the strobe off, and the servo
 parked at 90 degrees. `vision/detector.py` sends `JETSON_ONLINE` after opening
-serial and `JETSON_OFFLINE` during shutdown. This prevents a Nano reset caused
-by closing USB serial from restarting radar-driven scanning after `Ctrl+C`.
+serial and waiting for the Nano bootloader, then sends `JETSON_OFFLINE` during
+shutdown. This prevents a Nano reset caused by closing USB serial from
+restarting radar-driven scanning after `Ctrl+C`. The boot wait defaults to 2.5
+seconds and can be overridden with `NIGHTSENTINEL_ARDUINO_BOOT_DELAY`.
 
 The Arduino reports its actual held position as `STATE:SERVO_ANGLE:<angle>` so
 vision begins closed-loop steering from the physical sweep position instead of

@@ -38,6 +38,9 @@ except ImportError:
 
 SERIAL_PORT = os.getenv("NIGHTSENTINEL_SERIAL_PORT", "/dev/ttyUSB0")
 SERIAL_BAUD = int(os.getenv("NIGHTSENTINEL_SERIAL_BAUD", "9600"))
+ARDUINO_BOOT_DELAY_SECONDS = float(
+    os.getenv("NIGHTSENTINEL_ARDUINO_BOOT_DELAY", "2.5")
+)
 SERVO_DIRECTION = int(os.getenv("NIGHTSENTINEL_SERVO_DIRECTION", "-1"))
 STROBE_ENABLED = os.getenv("NIGHTSENTINEL_STROBE_ENABLED", "0") == "1"
 SHOW_PREVIEW = os.getenv("NIGHTSENTINEL_SHOW_PREVIEW", "0") == "1"
@@ -63,6 +66,8 @@ SERVO_COMMAND_INTERVAL_SECONDS = float(
 
 
 def main():
+    if ARDUINO_BOOT_DELAY_SECONDS < 0:
+        raise ValueError("NIGHTSENTINEL_ARDUINO_BOOT_DELAY cannot be negative")
     if SERVO_DIRECTION not in (-1, 1):
         raise ValueError("NIGHTSENTINEL_SERVO_DIRECTION must be 1 or -1")
     if SERVO_COMMAND_INTERVAL_SECONDS <= 0:
@@ -111,6 +116,22 @@ def main():
             bridge.close()
             bridge = None
             return False
+
+    # Opening USB serial resets many Arduino Nano boards. Wait for the
+    # bootloader and setup() to finish before claiming control, otherwise the
+    # JETSON_ONLINE command can be discarded while the firmware boots.
+    if bridge is not None and ARDUINO_BOOT_DELAY_SECONDS > 0:
+        print(
+            "[SERIAL] Waiting for Arduino boot "
+            f"({ARDUINO_BOOT_DELAY_SECONDS:.1f}s)..."
+        )
+        time.sleep(ARDUINO_BOOT_DELAY_SECONDS)
+        try:
+            bridge.poll()
+        except SerialBridgeError as error:
+            print(f"[SERIAL] Disconnected during boot: {error}")
+            bridge.close()
+            bridge = None
 
     # The firmware boots parked and only allows radar scanning while the
     # Jetson detector explicitly owns control.
