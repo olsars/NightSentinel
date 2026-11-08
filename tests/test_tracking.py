@@ -18,6 +18,11 @@ class ServoTrackingTests(unittest.TestCase):
             is_plausible_person_box(160, 70, 480, 470, 640, 480)
         )
 
+    def test_moderately_sized_person_box_is_accepted(self):
+        self.assertTrue(
+            is_plausible_person_box(220, 150, 420, 390, 640, 480)
+        )
+
     def test_largest_confirmed_person_is_selected(self):
         tracks = {
             1: {"area": 10_000},

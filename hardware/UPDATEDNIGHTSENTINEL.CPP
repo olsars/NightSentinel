@@ -14,7 +14,11 @@ const uint8_t echoPin = 9;      // JSN-SR04T echo
 const uint8_t ldrPin = A0;      // Photoresistor voltage divider
 
 // --- Configuration ---
-const int DARK_THRESHOLD = 67;
+// Calibrated from observed hardware values: covered/dim readings were 80-213
+// and uncovered readings were approximately 300-400. Separate enter/exit
+// thresholds prevent rapid mode changes near a single boundary.
+const int DARK_ENTER_THRESHOLD = 230;
+const int DAYLIGHT_EXIT_THRESHOLD = 270;
 const int SWEEP_MIN = 30;
 const int SWEEP_MAX = 150;
 const int SWEEP_STEP = 7;
@@ -36,6 +40,7 @@ UltrasonicSensor ultrasonic(
 
 bool systemActive = false;
 bool sweepEnabled = true;
+bool darkMode = false;
 unsigned long activationTime = 0;
 int currentServoAngle = 90;
 
@@ -55,13 +60,24 @@ void resetSystem() {
   stopStrobe();
 }
 
+bool updateDarkMode(int lightLevel) {
+  if (darkMode) {
+    if (lightLevel > DAYLIGHT_EXIT_THRESHOLD) {
+      darkMode = false;
+    }
+  } else if (lightLevel < DARK_ENTER_THRESHOLD) {
+    darkMode = true;
+  }
+  return darkMode;
+}
+
 // This is called only after the Jetson sends TRIGGER_STROBE. Radar or
 // ultrasonic proximity alone must never authorize the deterrent.
 void fireDeterrentSequence() {
   Serial.println(F("[DETERRENT] Jetson-authorized strobe sequence started."));
 
   for (int burst = 0; burst < 4; ++burst) {
-    if (analogRead(ldrPin) > DARK_THRESHOLD) {
+    if (!updateDarkMode(analogRead(ldrPin))) {
       Serial.println(F("[DAYTIME OVERRIDE] Strobe aborted."));
       resetSystem();
       return;
@@ -97,7 +113,8 @@ void fireDeterrentSequence() {
 }
 
 void handleCommand(const String &command) {
-  if (command != "RESET_SYSTEM" && analogRead(ldrPin) > DARK_THRESHOLD) {
+  if (command != "RESET_SYSTEM" &&
+      !updateDarkMode(analogRead(ldrPin))) {
     Serial.println(F("[NACK] Command blocked by daylight."));
     resetSystem();
     return;
@@ -180,7 +197,7 @@ void handleActiveTimeout() {
 }
 
 void handleDuringSweep() {
-  if (analogRead(ldrPin) > DARK_THRESHOLD) {
+  if (!updateDarkMode(analogRead(ldrPin))) {
     Serial.println(F("[DAYTIME OVERRIDE] Sweep stopped."));
     resetSystem();
     return;
@@ -208,10 +225,11 @@ void setup() {
 
 void loop() {
   const int lightLevel = analogRead(ldrPin);
+  const bool isDark = updateDarkMode(lightLevel);
 
   // Daylight is a hard safety interlock. The ultrasonic sensor is left idle
   // here to preserve the existing daytime power-saving behavior.
-  if (lightLevel > DARK_THRESHOLD) {
+  if (!isDark) {
     resetSystem();
     pollSerialCommand();
 

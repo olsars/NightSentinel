@@ -9,8 +9,8 @@ def is_plausible_person_box(
     frame_width,
     frame_height,
     *,
-    minimum_height_ratio=0.25,
-    minimum_area_ratio=0.03,
+    minimum_height_ratio=0.20,
+    minimum_area_ratio=0.02,
 ):
     """Reject small class-0 false positives that cannot be a nearby person."""
     if frame_width <= 0 or frame_height <= 0:

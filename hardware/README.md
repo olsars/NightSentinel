@@ -18,6 +18,11 @@ servo and strobe must use correctly rated external power/driver hardware with
 a common ground; do not power either load directly from an Arduino GPIO.
 Inspect the repaired wiring before applying power.
 
+The observed LDR ranges are separated with hysteresis: the system enters dark
+mode below 230 and returns to daylight lockout above 270. This avoids command
+rejection and servo resets when covered/dim readings fluctuate between 80 and
+213, while the observed uncovered readings remain around 300-400.
+
 ## Ultrasonic behavior
 
 `ultrasonic.h` uses a 250 ms interval, a provisional 25-450 cm valid range,
@@ -65,6 +70,11 @@ YOLO track IDs, a horizontal dead zone, bounded angle steps, and a 100 ms
 command interval to follow one person without excessive jitter. It returns to
 scan mode after losing the target. Set `NIGHTSENTINEL_SERVO_DIRECTION=-1` if
 physical movement is reversed.
+
+Vision pauses the sweep after two plausible person frames so confirmation is
+performed on a steady image, then requires five frames before selecting the
+track. The default confidence threshold is 0.4 and can be overridden with
+`NIGHTSENTINEL_CONFIDENCE`.
 
 Strobe commands from vision are disabled by default. For a controlled test,
 they can be enabled with `NIGHTSENTINEL_STROBE_ENABLED=1`; even then, both a

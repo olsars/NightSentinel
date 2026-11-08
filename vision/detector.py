@@ -39,9 +39,12 @@ CAMERA_SOURCE = (
     if CAMERA_SOURCE_VALUE.isdigit()
     else CAMERA_SOURCE_VALUE
 )
+MODEL_CONFIDENCE = float(os.getenv("NIGHTSENTINEL_CONFIDENCE", "0.4"))
 
+HOLD_CANDIDATE_FRAMES = 2
 CONFIRMATION_FRAMES = 5
 LOST_TARGET_FRAMES = 10
+CANDIDATE_LOST_FRAMES = 6
 SERVO_COMMAND_INTERVAL_SECONDS = 0.10
 
 
@@ -56,6 +59,8 @@ def main():
 
     target_track_id = None
     target_lost_frames = 0
+    candidate_track_id = None
+    candidate_lost_frames = 0
     current_servo_angle = 90
     servo_angle_known = False
     last_servo_command_time = 0.0
@@ -93,7 +98,7 @@ def main():
         source=CAMERA_SOURCE,
         device=0,
         classes=[0],
-        conf=0.5,
+        conf=MODEL_CONFIDENCE,
         tracker="bytetrack.yaml",
         persist=True,
         stream=True,
@@ -152,6 +157,43 @@ def main():
                 if track_id not in visible_tracks:
                     confirmation_counts[track_id] = 0
 
+            # Stop a moving sweep early so YOLO can confirm the candidate on
+            # stable frames. Small false positives have already been filtered.
+            if target_track_id is None:
+                if candidate_track_id in visible_tracks:
+                    candidate_lost_frames = 0
+                elif candidate_track_id is not None:
+                    candidate_lost_frames += 1
+                    if candidate_lost_frames >= CANDIDATE_LOST_FRAMES:
+                        print(
+                            f"[TRACKING] Candidate {candidate_track_id} lost; "
+                            "resuming scan"
+                        )
+                        candidate_track_id = None
+                        candidate_lost_frames = 0
+                        servo_angle_known = False
+                        send_arduino_command("SERVO_SCAN")
+
+                if candidate_track_id is None:
+                    hold_candidates = [
+                        track_id
+                        for track_id in visible_tracks
+                        if confirmation_counts.get(track_id, 0)
+                        >= HOLD_CANDIDATE_FRAMES
+                    ]
+                    if hold_candidates:
+                        candidate_track_id = max(
+                            hold_candidates,
+                            key=lambda track_id: visible_tracks[track_id]["area"],
+                        )
+                        candidate_lost_frames = 0
+                        servo_angle_known = False
+                        send_arduino_command("SERVO_STOP")
+                        print(
+                            f"[TRACKING] Holding sweep for candidate "
+                            f"{candidate_track_id}"
+                        )
+
             for track_id, detection in visible_tracks.items():
                 confirmation_counts[track_id] = (
                     confirmation_counts.get(track_id, 0) + 1
@@ -187,6 +229,8 @@ def main():
             if selected_track_id != target_track_id:
                 previous_track_id = target_track_id
                 target_track_id = selected_track_id
+                candidate_track_id = None
+                candidate_lost_frames = 0
                 target_lost_frames = 0
                 servo_angle_known = False
                 send_arduino_command("SERVO_STOP")
