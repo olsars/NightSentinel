@@ -57,8 +57,15 @@ hardware teammate confirms the board, sensor revision, wiring, and pins,
 compile it from the repository root with:
 
 ```bash
-arduino-cli compile --fqbn arduino:avr:nano hardware/ultrasonic_test
+arduino-cli compile \
+  --fqbn arduino:avr:nano \
+  --build-property "compiler.cpp.extra_flags=-I$(pwd)/hardware" \
+  hardware/ultrasonic_test
 ```
+
+The explicit include path is required because Arduino CLI copies the sketch to
+a temporary build directory; a relative include such as `../ultrasonic.h`
+would no longer point at the repository's canonical header from there.
 
 Do not upload automatically. Some Nano clones require a different processor
 or old-bootloader board option, which must be confirmed before upload.

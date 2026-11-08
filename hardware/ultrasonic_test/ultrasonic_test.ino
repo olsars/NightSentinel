@@ -1,4 +1,4 @@
-#include "../ultrasonic.h"
+#include <ultrasonic.h>
 
 // Standalone JSN-SR04T test only. Confirm the sensor revision and inspect the
 // repaired wiring before powering the circuit.
