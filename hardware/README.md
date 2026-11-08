@@ -66,10 +66,12 @@ vision begins closed-loop steering from the physical sweep position instead of
 assuming the camera was centered when a person was acquired.
 
 Servo angles are limited to 30-150 degrees. `vision/detector.py` uses confirmed
-YOLO track IDs, a horizontal dead zone, bounded angle steps, and an 80 ms
-command interval to follow one person without excessive jitter. It returns to
-scan mode after losing the target. The default servo direction is `-1`; set
-`NIGHTSENTINEL_SERVO_DIRECTION=1` if physical movement is reversed.
+YOLO track IDs, a smoothed target center, a horizontal dead zone, bounded angle
+steps, and a 100 ms command interval to follow one person without excessive
+jitter. Once acquired, the target remains selected until it has been absent
+for multiple frames; only then does scanning resume. The default servo
+direction is `-1`; set `NIGHTSENTINEL_SERVO_DIRECTION=1` if physical movement
+is reversed.
 
 Vision pauses the sweep after two plausible person frames so confirmation is
 performed on a steady image, then requires five frames before selecting the

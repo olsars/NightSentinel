@@ -30,10 +30,11 @@ def select_target(
     visible_tracks,
     confirmed_track_ids,
     current_track_id=None,
-    *,
-    switch_area_ratio=1.5,
 ):
-    """Prefer the largest confirmed person while avoiding target jitter."""
+    """Acquire the largest person, then keep that target until it is lost."""
+    if current_track_id is not None:
+        return current_track_id
+
     candidates = [
         track_id
         for track_id in confirmed_track_ids
@@ -46,16 +47,16 @@ def select_target(
         candidates,
         key=lambda track_id: visible_tracks[track_id]["area"],
     )
-    if current_track_id not in visible_tracks:
-        return largest_track_id
-    if largest_track_id == current_track_id:
-        return current_track_id
+    return largest_track_id
 
-    current_area = visible_tracks[current_track_id]["area"]
-    largest_area = visible_tracks[largest_track_id]["area"]
-    if largest_area >= current_area * switch_area_ratio:
-        return largest_track_id
-    return current_track_id
+
+def smooth_target_center(previous_center, observed_center, *, alpha=0.25):
+    """Apply an exponential moving average to noisy detection centers."""
+    if not 0 < alpha <= 1:
+        raise ValueError("alpha must be greater than 0 and at most 1")
+    if previous_center is None:
+        return observed_center
+    return previous_center + alpha * (observed_center - previous_center)
 
 
 def next_servo_angle(
@@ -65,9 +66,9 @@ def next_servo_angle(
     *,
     minimum_angle=30,
     maximum_angle=150,
-    deadband_ratio=0.08,
-    gain_degrees=24.0,
-    maximum_step=6,
+    deadband_ratio=0.12,
+    gain_degrees=18.0,
+    maximum_step=4,
     direction=1,
 ):
     """Return a bounded servo angle, or the current angle inside deadband."""

@@ -22,11 +22,17 @@ try:  # Support both `python vision/detector.py` and module execution.
         is_plausible_person_box,
         next_servo_angle,
         select_target,
+        smooth_target_center,
     )
     from .web_preview import WebPreviewServer
 except ImportError:
     from events import send_event
-    from tracking import is_plausible_person_box, next_servo_angle, select_target
+    from tracking import (
+        is_plausible_person_box,
+        next_servo_angle,
+        select_target,
+        smooth_target_center,
+    )
     from web_preview import WebPreviewServer
 
 
@@ -49,10 +55,10 @@ STREAM_FPS = float(os.getenv("NIGHTSENTINEL_STREAM_FPS", "10"))
 
 HOLD_CANDIDATE_FRAMES = 2
 CONFIRMATION_FRAMES = 5
-LOST_TARGET_FRAMES = 10
+LOST_TARGET_FRAMES = 18
 CANDIDATE_LOST_FRAMES = 6
 SERVO_COMMAND_INTERVAL_SECONDS = float(
-    os.getenv("NIGHTSENTINEL_SERVO_COMMAND_INTERVAL", "0.08")
+    os.getenv("NIGHTSENTINEL_SERVO_COMMAND_INTERVAL", "0.10")
 )
 
 
@@ -75,6 +81,7 @@ def main():
 
     target_track_id = None
     target_lost_frames = 0
+    smoothed_target_center_x = None
     candidate_track_id = None
     candidate_lost_frames = 0
     current_servo_angle = 90
@@ -267,6 +274,7 @@ def main():
             if selected_track_id != target_track_id:
                 previous_track_id = target_track_id
                 target_track_id = selected_track_id
+                smoothed_target_center_x = None
                 candidate_track_id = None
                 candidate_lost_frames = 0
                 target_lost_frames = 0
@@ -287,6 +295,7 @@ def main():
                         print(f"[TRACKING] Lost track {target_track_id}")
                         target_track_id = None
                         target_lost_frames = 0
+                        smoothed_target_center_x = None
                         servo_angle_known = False
                         send_arduino_command("SERVO_SCAN")
                 continue
@@ -295,10 +304,13 @@ def main():
             if not servo_angle_known:
                 continue
 
-            target_center_x = visible_tracks[target_track_id]["center_x"]
+            smoothed_target_center_x = smooth_target_center(
+                smoothed_target_center_x,
+                visible_tracks[target_track_id]["center_x"],
+            )
             requested_angle = next_servo_angle(
                 current_servo_angle,
-                target_center_x,
+                smoothed_target_center_x,
                 frame_width,
                 direction=SERVO_DIRECTION,
             )

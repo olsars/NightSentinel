@@ -4,6 +4,7 @@ from vision.tracking import (
     is_plausible_person_box,
     next_servo_angle,
     select_target,
+    smooth_target_center,
 )
 
 
@@ -37,15 +38,34 @@ class ServoTrackingTests(unittest.TestCase):
         }
         self.assertEqual(select_target(tracks, [1, 2], 1), 1)
 
-    def test_substantially_larger_person_replaces_target(self):
+    def test_current_target_is_sticky_when_larger_person_appears(self):
         tracks = {
             1: {"area": 40_000},
             2: {"area": 80_000},
         }
-        self.assertEqual(select_target(tracks, [1, 2], 1), 2)
+        self.assertEqual(select_target(tracks, [1, 2], 1), 1)
+
+    def test_current_target_is_retained_during_short_detection_gap(self):
+        self.assertEqual(select_target({}, [], 7), 7)
+
+    def test_first_center_observation_is_not_delayed(self):
+        self.assertEqual(smooth_target_center(None, 400), 400)
+
+    def test_center_observations_are_smoothed(self):
+        self.assertEqual(smooth_target_center(400, 600), 450)
+
+    def test_invalid_smoothing_alpha_is_rejected(self):
+        with self.assertRaises(ValueError):
+            smooth_target_center(400, 600, alpha=0)
 
     def test_centered_target_holds_angle(self):
         self.assertEqual(next_servo_angle(90, 640, 1280), 90)
+
+    def test_small_center_jitter_holds_angle(self):
+        self.assertEqual(next_servo_angle(90, 700, 1280), 90)
+
+    def test_large_error_is_limited_to_four_degree_step(self):
+        self.assertEqual(next_servo_angle(90, 1280, 1280), 94)
 
     def test_target_right_increases_angle(self):
         self.assertGreater(next_servo_angle(90, 1000, 1280), 90)
