@@ -2,8 +2,8 @@
 
 // Standalone JSN-SR04T test only. Confirm the sensor revision and inspect the
 // repaired wiring before powering the circuit.
-constexpr uint8_t ULTRASONIC_TRIGGER_PIN = 6;
-constexpr uint8_t ULTRASONIC_ECHO_PIN = 7;
+constexpr uint8_t ULTRASONIC_TRIGGER_PIN = 8;
+constexpr uint8_t ULTRASONIC_ECHO_PIN = 9;
 
 UltrasonicSensor ultrasonic(
     ULTRASONIC_TRIGGER_PIN,

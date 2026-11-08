@@ -38,8 +38,9 @@ def send_event(track_id, event_type="person_detected", zone="front_door"):
             timeout=3,
         )
 
-        # The backend contract specifies HTTP 201 for new events.
-        if response.status_code == 201:
+        # New events return 201; duplicate-suppressed events return the
+        # existing record with 200 and should also count as accepted.
+        if response.status_code in (200, 201):
             print(f"[EVENT] Sent successfully: {payload}")
             return True
 

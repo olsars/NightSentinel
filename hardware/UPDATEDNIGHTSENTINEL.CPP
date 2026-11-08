@@ -1,254 +1,277 @@
+#include <Arduino.h>
 #include <Servo.h>
+#include <ultrasonic.h>
 
-// --- Pin Assignments ---
-const int radarOutPin = 4;   // mmWave Radar 'OUT' pin -> HIGH = Presence detected
-const int trigPin = 8;       // JSN-SR04T Ultrasonic Trigger pin
-const int echoPin = 9;       // JSN-SR04T Ultrasonic Echo pin
-const int ldrPin = A0;       // Photoresistor voltage divider input 
-const int servoPin = 5;      // MG996R Servo signal pin
-const int relayPin = 7;      // Connected to Relay 'IN'
+// NightSentinel integrated Arduino Nano firmware.
+// The Jetson is the only component allowed to classify a target as a person.
+
+// --- Confirmed Pin Assignments ---
+const uint8_t radarOutPin = 4;  // mmWave OUT: HIGH means presence detected
+const uint8_t servoPin = 5;     // MG996R signal (use an external supply)
+const uint8_t relayPin = 7;     // Active-low relay input
+const uint8_t trigPin = 8;      // JSN-SR04T trigger
+const uint8_t echoPin = 9;      // JSN-SR04T echo
+const uint8_t ldrPin = A0;      // Photoresistor voltage divider
+
+// --- Configuration ---
+const int DARK_THRESHOLD = 67;
+const int SWEEP_MIN = 30;
+const int SWEEP_MAX = 150;
+const int SWEEP_STEP = 7;
+const unsigned long SWEEP_DELAY_MS = 130UL;
+const unsigned long ACTIVE_TIMEOUT_MS = 10000UL;
 
 Servo scannerServo;
-
-// --- Configured Settings ---
-const int DARK_THRESHOLD = 67;       // LDR threshold: below this is considered "Night"
-const int SWEEP_MIN = 30;             // Sweep min set to 30°
-const int SWEEP_MAX = 150;            // Sweep max set to 150°
-const int SWEEP_STEP = 7;             // Sweep step set to 7°
-const int SWEEP_DELAY = 130;          // Sweep delay set to 130 ms
-
-// JSN-SR04T Range Limits: Ignore anything under 25 cm (blind spot) up to 150 cm max
-const long MIN_VALID_DISTANCE_CM = 25; 
-const long TARGET_DISTANCE_CM = 80;  
+UltrasonicSensor ultrasonic(
+    trigPin,
+    echoPin,
+    250UL,    // Measurement interval
+    100.0f,   // Near threshold
+    130.0f,   // Clear threshold
+    3,        // Consecutive valid near readings required
+    25.0f,    // Provisional minimum valid distance
+    450.0f,   // Provisional maximum valid distance
+    30000UL   // pulseIn timeout
+);
 
 bool systemActive = false;
+bool sweepEnabled = true;
 unsigned long activationTime = 0;
-const unsigned long ACTIVE_TIMEOUT = 10000; // 10-second active window
+int currentServoAngle = 90;
 
-// --- Forward Declarations / Helper Functions ---
 void stopStrobe() {
-  digitalWrite(relayPin, HIGH); // Relay OFF default
+  digitalWrite(relayPin, HIGH);
 }
 
-// --- Fast Relay-Safe Strobe Sequence with Daylight Safety Interlock ---
-void fireDeterrentSequence() {
-  Serial.println("[DEFCON 1] JSN target verified! Firing fast high-impact relay strobe!");
+void setServoAngle(int angle) {
+  currentServoAngle = constrain(angle, SWEEP_MIN, SWEEP_MAX);
+  scannerServo.write(currentServoAngle);
+}
 
-  for (int burst = 0; burst < 4; burst++) {
-    
-    // Safety check: If daylight hits mid-strobe, abort immediately!
+void resetSystem() {
+  systemActive = false;
+  sweepEnabled = true;
+  setServoAngle(90);
+  stopStrobe();
+}
+
+// This is called only after the Jetson sends TRIGGER_STROBE. Radar or
+// ultrasonic proximity alone must never authorize the deterrent.
+void fireDeterrentSequence() {
+  Serial.println(F("[DETERRENT] Jetson-authorized strobe sequence started."));
+
+  for (int burst = 0; burst < 4; ++burst) {
     if (analogRead(ldrPin) > DARK_THRESHOLD) {
-      Serial.println("[DAYTIME OVERRIDE] Light detected during strobe! Aborting immediately.");
-      stopStrobe();
-      systemActive = false;
+      Serial.println(F("[DAYTIME OVERRIDE] Strobe aborted."));
+      resetSystem();
       return;
     }
 
-    digitalWrite(relayPin, LOW);  // Relay ON (Full brightness)
-    delay(80);                    
-    digitalWrite(relayPin, HIGH); // Relay OFF
-    delay(50);                    
-    
-    digitalWrite(relayPin, LOW);  // Relay ON (Full brightness)
-    delay(80);                   
-    digitalWrite(relayPin, HIGH); // Relay OFF
+    digitalWrite(relayPin, LOW);
+    delay(80);
+    digitalWrite(relayPin, HIGH);
+    delay(50);
+
+    digitalWrite(relayPin, LOW);
+    delay(80);
+    digitalWrite(relayPin, HIGH);
     delay(60);
 
-    digitalWrite(relayPin, LOW);    // ON (Maximum glare)
-    delay(150);                     
-    digitalWrite(relayPin, HIGH);   // OFF
+    digitalWrite(relayPin, LOW);
+    delay(150);
+    digitalWrite(relayPin, HIGH);
     delay(70);
 
-    digitalWrite(relayPin, LOW);  // ON
+    digitalWrite(relayPin, LOW);
     delay(60);
-    digitalWrite(relayPin, HIGH); // OFF
+    digitalWrite(relayPin, HIGH);
     delay(60);
-    digitalWrite(relayPin, LOW);  // ON
+    digitalWrite(relayPin, LOW);
     delay(60);
-    digitalWrite(relayPin, HIGH); // OFF
-    
+    digitalWrite(relayPin, HIGH);
+
     delay(random(100, 250));
   }
 
   stopStrobe();
 }
 
-// --- Read Distance from JSN-SR04T Sensor ---
-long getJsnDistanceCm() {
-  digitalWrite(trigPin, LOW);
-  delayMicroseconds(2);
-  digitalWrite(trigPin, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
-
-  long duration = pulseIn(echoPin, HIGH, 30000);
-  
-  if (duration == 0) {
-    return -1; 
-  }
-  
-  long cm = duration * 0.034 / 2;
-  return cm;
-}
-// Test
-// --- Double-Check Distance to Prevent False 19cm Trips ---
-bool isRealTargetDetected() {
-  long d1 = getJsnDistanceCm();
-  
-  if (d1 >= MIN_VALID_DISTANCE_CM && d1 <= TARGET_DISTANCE_CM) {
-    delay(30); 
-    long d2 = getJsnDistanceCm();
-    if (d2 >= MIN_VALID_DISTANCE_CM && d2 <= TARGET_DISTANCE_CM) {
-      Serial.print("[JSN VERIFIED] Confirmed target at ");
-      Serial.print(d2);
-      Serial.println(" cm.");
-      return true;
-    }
-  }
-  return false;
-}
-
-// --- Helper: Handle Serial Commands Mid-Sweep ---
-void handleSerialDuringSweep() {
-  // Instant daylight check during sweep
-  if (analogRead(ldrPin) > DARK_THRESHOLD) {
-    stopStrobe();
-    systemActive = false;
-    scannerServo.write(90);
+void handleCommand(const String &command) {
+  if (command != "RESET_SYSTEM" && analogRead(ldrPin) > DARK_THRESHOLD) {
+    Serial.println(F("[NACK] Command blocked by daylight."));
+    resetSystem();
     return;
   }
 
-  if (Serial.available() > 0) {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
+  if (command == "TRIGGER_STROBE") {
+    if (!systemActive) {
+      Serial.println(F("[NACK] TRIGGER_STROBE requires an active radar window."));
+      return;
+    }
 
-    if (command == "TRIGGER_STROBE") {
-      Serial.println("[ACK] Jetson override target verified! Firing strobe!");
-      fireDeterrentSequence();
+    Serial.println(F("[ACK] Jetson person confirmation accepted."));
+    sweepEnabled = false;
+    fireDeterrentSequence();
+    resetSystem();
+  } else if (command == "SERVO_STOP") {
+    systemActive = true;
+    sweepEnabled = false;
+    activationTime = millis();
+    setServoAngle(currentServoAngle);
+    Serial.println(F("[ACK] Servo sweep stopped."));
+    Serial.print(F("STATE:SERVO_ANGLE:"));
+    Serial.println(currentServoAngle);
+  } else if (command == "SERVO_SCAN") {
+    systemActive = true;
+    sweepEnabled = true;
+    activationTime = millis();
+    Serial.println(F("[ACK] Servo sweep enabled."));
+  } else if (command.startsWith("SERVO_ANGLE:")) {
+    const int requestedAngle = command.substring(12).toInt();
+    if (requestedAngle < SWEEP_MIN || requestedAngle > SWEEP_MAX) {
+      Serial.println(F("[NACK] Servo angle must be between 30 and 150."));
+      return;
     }
-    else if (command == "RESET_SYSTEM") {
-      systemActive = false;
-      scannerServo.write(90);
-      stopStrobe();
-    }
+
+    systemActive = true;
+    sweepEnabled = false;
+    activationTime = millis();
+    setServoAngle(requestedAngle);
+    Serial.print(F("[ACK] Servo angle set to "));
+    Serial.println(currentServoAngle);
+    Serial.print(F("STATE:SERVO_ANGLE:"));
+    Serial.println(currentServoAngle);
+  } else if (command == "RESET_SYSTEM") {
+    resetSystem();
+    Serial.println(F("[ACK] System reset to standby."));
+  } else if (command.length() > 0) {
+    Serial.print(F("[NACK] Unknown command: "));
+    Serial.println(command);
   }
+}
+
+void pollSerialCommand() {
+  if (Serial.available() <= 0) {
+    return;
+  }
+
+  String command = Serial.readStringUntil('\n');
+  command.trim();
+  handleCommand(command);
+}
+
+void handleActiveTimeout() {
+  // Tracking mode is explicitly ended by SERVO_SCAN or RESET_SYSTEM. This
+  // keeps a centered target from timing out merely because no angle changed.
+  if (!sweepEnabled) {
+    return;
+  }
+
+  if (millis() - activationTime <= ACTIVE_TIMEOUT_MS) {
+    return;
+  }
+
+  if (digitalRead(radarOutPin) == LOW) {
+    Serial.println(F("[TIMEOUT] Returning to standby center."));
+    resetSystem();
+  } else {
+    activationTime = millis();
+  }
+}
+
+void handleDuringSweep() {
+  if (analogRead(ldrPin) > DARK_THRESHOLD) {
+    Serial.println(F("[DAYTIME OVERRIDE] Sweep stopped."));
+    resetSystem();
+    return;
+  }
+
+  pollSerialCommand();
+  ultrasonic.update();
 }
 
 void setup() {
   Serial.begin(9600);
-  
+  Serial.setTimeout(50);
+
   pinMode(radarOutPin, INPUT);
-  pinMode(trigPin, OUTPUT);
-  pinMode(echoPin, INPUT);
   pinMode(ldrPin, INPUT);
   pinMode(relayPin, OUTPUT);
-  
-  stopStrobe(); 
-  scannerServo.attach(servoPin);
-  scannerServo.write(90); 
 
-  Serial.println("--- NightSentinel Hardware: Instant Daylight Gating Active ---");
+  stopStrobe();
+  scannerServo.attach(servoPin);
+  setServoAngle(90);
+  ultrasonic.begin();
+
+  Serial.println(F("--- NightSentinel Hardware: Jetson-authorized deterrent mode ---"));
 }
 
 void loop() {
-  // --- 1. Photoresistor (LDR) Ambient Light Check (Top Priority) ---
-  int lightLevel = analogRead(ldrPin);
+  const int lightLevel = analogRead(ldrPin);
 
+  // Daylight is a hard safety interlock. The ultrasonic sensor is left idle
+  // here to preserve the existing daytime power-saving behavior.
   if (lightLevel > DARK_THRESHOLD) {
-    stopStrobe();
-    systemActive = false;
-    scannerServo.write(90);
-    
-    static unsigned long lastPrint = 0;
-    if (millis() - lastPrint > 1000) {
-      Serial.print("[DAYTIME MODE] LDR Light Level: ");
+    resetSystem();
+    pollSerialCommand();
+
+    static unsigned long lastDaytimePrint = 0;
+    if (millis() - lastDaytimePrint > 1000UL) {
+      Serial.print(F("[DAYTIME MODE] LDR Light Level: "));
       Serial.print(lightLevel);
-      Serial.println(" (System Locked OFF)");
-      lastPrint = millis();
+      Serial.println(F(" (System Locked OFF)"));
+      lastDaytimePrint = millis();
     }
-    
-    delay(100); 
-    return; // Hard exit loop immediately
+
+    delay(100);
+    return;
   }
 
-  // --- 2. Listen for Incoming Serial Commands ---
-  if (Serial.available() > 0) {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
+  // Distance is supplementary information only. UltrasonicSensor emits the
+  // standardized DISTANCE_CM and proximity state-change messages.
+  ultrasonic.update();
+  pollSerialCommand();
 
-    if (command == "TRIGGER_STROBE") {
-      Serial.println("[ACK] Jetson camera target verified. Firing deterrent strobe!");
-      fireDeterrentSequence(); 
-    }
-    else if (command == "RESET_SYSTEM") {
-      Serial.println("[ACK] System resetting to standby.");
-      systemActive = false;
-      scannerServo.write(90);
-      stopStrobe();
-    }
-  }
-
-  // --- 3. Monitor Digital mmWave Pin ---
-  int radarState = digitalRead(radarOutPin);
-
-  if (radarState == HIGH && !systemActive) {
+  if (digitalRead(radarOutPin) == HIGH && !systemActive) {
     systemActive = true;
+    sweepEnabled = true;
     activationTime = millis();
-    
-    Serial.print("[RADAR TRIGGER] Motion detected on Pin 4! LDR: ");
+
+    Serial.print(F("[RADAR TRIGGER] Motion detected on Pin 4! LDR: "));
     Serial.println(lightLevel);
-    Serial.println("EVENT:RADAR_TRIPPED");
+    Serial.println(F("EVENT:RADAR_TRIPPED"));
   }
 
-  // --- 4. Active Sweeping & JSN Distance Scanning ---
-  if (systemActive) {
-    
-    // Sweep forward
-    for (int angle = SWEEP_MIN; angle <= SWEEP_MAX; angle += SWEEP_STEP) {
-      scannerServo.write(angle);
-      handleSerialDuringSweep();
-      
-      if (!systemActive) break; // Break out if daylight triggered mid-sweep
-      
-      if (isRealTargetDetected()) {
-        Serial.println("EVENT:JSN_TRIGGERED");
-        fireDeterrentSequence();
-      }
-      
-      delay(SWEEP_DELAY);
-    }
-    
-    // Sweep backward if still active
-    if (systemActive) {
-      for (int angle = SWEEP_MAX; angle >= SWEEP_MIN; angle -= SWEEP_STEP) {
-        scannerServo.write(angle);
-        handleSerialDuringSweep();
-        
-        if (!systemActive) break; // Break out if daylight triggered mid-sweep
-        
-        if (isRealTargetDetected()) {
-          Serial.println("EVENT:JSN_TRIGGERED");
-          fireDeterrentSequence();
-        }
-        
-        delay(SWEEP_DELAY);
-      }
-    }
-
-    // Timeout check
-    if (millis() - activationTime > ACTIVE_TIMEOUT) {
-      if (digitalRead(radarOutPin) == LOW) {
-        Serial.println("[TIMEOUT] Returning to standby center.");
-        systemActive = false;
-        scannerServo.write(90);
-        stopStrobe();
-      } else {
-        activationTime = millis(); 
-      }
-    }
-  } else {
-    scannerServo.write(90);
+  if (!systemActive) {
+    setServoAngle(90);
     stopStrobe();
     delay(50);
+    return;
   }
-} 
+
+  // SERVO_STOP and SERVO_ANGLE place the servo in hold/tracking mode while
+  // the loop continues polling commands and measuring distance.
+  if (!sweepEnabled) {
+    handleActiveTimeout();
+    delay(10);
+    return;
+  }
+
+  for (int angle = SWEEP_MIN;
+       angle <= SWEEP_MAX && systemActive && sweepEnabled;
+       angle += SWEEP_STEP) {
+    setServoAngle(angle);
+    handleDuringSweep();
+    delay(SWEEP_DELAY_MS);
+  }
+
+  for (int angle = SWEEP_MAX;
+       angle >= SWEEP_MIN && systemActive && sweepEnabled;
+       angle -= SWEEP_STEP) {
+    setServoAngle(angle);
+    handleDuringSweep();
+    delay(SWEEP_DELAY_MS);
+  }
+
+  handleActiveTimeout();
+}
