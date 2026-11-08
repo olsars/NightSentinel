@@ -18,10 +18,14 @@ from hardware.serial_bridge import (  # noqa: E402
 
 try:  # Support both `python vision/detector.py` and module execution.
     from .events import send_event
-    from .tracking import next_servo_angle
+    from .tracking import (
+        is_plausible_person_box,
+        next_servo_angle,
+        select_target,
+    )
 except ImportError:
     from events import send_event
-    from tracking import next_servo_angle
+    from tracking import is_plausible_person_box, next_servo_angle, select_target
 
 
 SERIAL_PORT = os.getenv("NIGHTSENTINEL_SERIAL_PORT", "/dev/ttyUSB0")
@@ -36,7 +40,7 @@ CAMERA_SOURCE = (
     else CAMERA_SOURCE_VALUE
 )
 
-CONFIRMATION_FRAMES = 3
+CONFIRMATION_FRAMES = 5
 LOST_TARGET_FRAMES = 10
 SERVO_COMMAND_INTERVAL_SECONDS = 0.10
 
@@ -118,6 +122,8 @@ def main():
                     bridge = None
 
             visible_tracks = {}
+            frame_height = int(result.orig_shape[0])
+            frame_width = int(result.orig_shape[1])
             if result.boxes is not None:
                 for box in result.boxes:
                     if box.id is None:
@@ -125,10 +131,21 @@ def main():
 
                     track_id = int(box.id.item())
                     confidence = float(box.conf.item())
-                    x1, _y1, x2, _y2 = box.xyxy[0].tolist()
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    if not is_plausible_person_box(
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        frame_width,
+                        frame_height,
+                    ):
+                        continue
+
                     visible_tracks[track_id] = {
                         "confidence": confidence,
                         "center_x": (x1 + x2) / 2.0,
+                        "area": (x2 - x1) * (y2 - y1),
                     }
 
             for track_id in list(confirmation_counts):
@@ -162,15 +179,24 @@ def main():
                 if confirmation_counts.get(track_id, 0) >= CONFIRMATION_FRAMES
             ]
 
-            if target_track_id is None and confirmed_tracks:
-                target_track_id = max(
-                    confirmed_tracks,
-                    key=lambda track_id: visible_tracks[track_id]["confidence"],
-                )
+            selected_track_id = select_target(
+                visible_tracks,
+                confirmed_tracks,
+                target_track_id,
+            )
+            if selected_track_id != target_track_id:
+                previous_track_id = target_track_id
+                target_track_id = selected_track_id
                 target_lost_frames = 0
                 servo_angle_known = False
                 send_arduino_command("SERVO_STOP")
-                print(f"[TRACKING] Locked track {target_track_id}")
+                if previous_track_id is None:
+                    print(f"[TRACKING] Locked track {target_track_id}")
+                else:
+                    print(
+                        f"[TRACKING] Switched from track {previous_track_id} "
+                        f"to larger track {target_track_id}"
+                    )
 
             if target_track_id not in visible_tracks:
                 if target_track_id is not None:
@@ -187,7 +213,6 @@ def main():
             if not servo_angle_known:
                 continue
 
-            frame_width = int(result.orig_shape[1])
             target_center_x = visible_tracks[target_track_id]["center_x"]
             requested_angle = next_servo_angle(
                 current_servo_angle,
