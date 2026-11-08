@@ -23,9 +23,11 @@ try:  # Support both `python vision/detector.py` and module execution.
         next_servo_angle,
         select_target,
     )
+    from .web_preview import WebPreviewServer
 except ImportError:
     from events import send_event
     from tracking import is_plausible_person_box, next_servo_angle, select_target
+    from web_preview import WebPreviewServer
 
 
 SERIAL_PORT = os.getenv("NIGHTSENTINEL_SERIAL_PORT", "/dev/ttyUSB0")
@@ -40,6 +42,10 @@ CAMERA_SOURCE = (
     else CAMERA_SOURCE_VALUE
 )
 MODEL_CONFIDENCE = float(os.getenv("NIGHTSENTINEL_CONFIDENCE", "0.4"))
+STREAM_ENABLED = os.getenv("NIGHTSENTINEL_STREAM_ENABLED", "0") == "1"
+STREAM_HOST = os.getenv("NIGHTSENTINEL_STREAM_HOST", "0.0.0.0")
+STREAM_PORT = int(os.getenv("NIGHTSENTINEL_STREAM_PORT", "8080"))
+STREAM_FPS = float(os.getenv("NIGHTSENTINEL_STREAM_FPS", "10"))
 
 HOLD_CANDIDATE_FRAMES = 2
 CONFIRMATION_FRAMES = 5
@@ -57,6 +63,10 @@ def main():
         raise ValueError(
             "NIGHTSENTINEL_SERVO_COMMAND_INTERVAL must be positive"
         )
+    if not 1 <= STREAM_PORT <= 65535:
+        raise ValueError("NIGHTSENTINEL_STREAM_PORT must be from 1 to 65535")
+    if STREAM_FPS <= 0:
+        raise ValueError("NIGHTSENTINEL_STREAM_FPS must be positive")
 
     model = YOLO("yolo11n.pt")
     alerted_tracks = set()
@@ -70,7 +80,9 @@ def main():
     current_servo_angle = 90
     servo_angle_known = False
     last_servo_command_time = 0.0
+    last_stream_frame_time = 0.0
     proximity_near = False
+    preview_server = None
 
     bridge = None
     try:
@@ -99,6 +111,16 @@ def main():
         "[NightSentinel] Strobe authorization is "
         f"{'ENABLED' if STROBE_ENABLED else 'DISABLED'}"
     )
+    if STREAM_ENABLED:
+        try:
+            preview_server = WebPreviewServer(STREAM_HOST, STREAM_PORT)
+            preview_server.start()
+            print(
+                "[NightSentinel] Laptop preview: "
+                f"http://<jetson-ip>:{STREAM_PORT}"
+            )
+        except OSError as error:
+            print(f"[PREVIEW] Unable to start web preview: {error}")
 
     results = model.track(
         source=CAMERA_SOURCE,
@@ -114,6 +136,12 @@ def main():
 
     try:
         for result in results:
+            if preview_server is not None:
+                now = time.monotonic()
+                if now - last_stream_frame_time >= 1.0 / STREAM_FPS:
+                    preview_server.publish_image(result.plot())
+                    last_stream_frame_time = now
+
             if bridge is not None:
                 try:
                     for reading in bridge.poll():
@@ -298,6 +326,9 @@ def main():
         print(f"[CAMERA] Unable to start source {CAMERA_SOURCE}: {error}")
 
     finally:
+        if preview_server is not None:
+            preview_server.stop()
+
         if bridge is not None:
             try:
                 bridge.send_command("RESET_SYSTEM")

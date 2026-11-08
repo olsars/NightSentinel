@@ -66,10 +66,10 @@ vision begins closed-loop steering from the physical sweep position instead of
 assuming the camera was centered when a person was acquired.
 
 Servo angles are limited to 30-150 degrees. `vision/detector.py` uses confirmed
-YOLO track IDs, a horizontal dead zone, bounded angle steps, and a 100 ms
+YOLO track IDs, a horizontal dead zone, bounded angle steps, and an 80 ms
 command interval to follow one person without excessive jitter. It returns to
-scan mode after losing the target. Set `NIGHTSENTINEL_SERVO_DIRECTION=-1` if
-physical movement is reversed.
+scan mode after losing the target. The default servo direction is `-1`; set
+`NIGHTSENTINEL_SERVO_DIRECTION=1` if physical movement is reversed.
 
 Vision pauses the sweep after two plausible person frames so confirmation is
 performed on a steady image, then requires five frames before selecting the
@@ -120,12 +120,26 @@ Run vision with tracking and strobe disabled:
 
 ```bash
 NIGHTSENTINEL_STROBE_ENABLED=0 \
-NIGHTSENTINEL_CAMERA_SOURCE=/dev/video1 \
+NIGHTSENTINEL_CAMERA_SOURCE=1 \
 ./.venv/bin/python -B vision/detector.py
 ```
 
 The camera defaults to index `0`. Override it with a numeric index or stable
 device path when the C920 enumerates elsewhere, such as `/dev/video1`.
+
+To view annotated detections from a laptop on the same trusted local network,
+enable the optional 10 FPS web preview:
+
+```bash
+NIGHTSENTINEL_CAMERA_SOURCE=1 \
+NIGHTSENTINEL_STREAM_ENABLED=1 \
+NIGHTSENTINEL_STROBE_ENABLED=0 \
+./.venv/bin/python -B vision/detector.py
+```
+
+Open `http://<jetson-ip>:8080` in the laptop browser. The preview has no login,
+so only enable it on a trusted local network. Override the port with
+`NIGHTSENTINEL_STREAM_PORT` and stop the detector to stop the stream.
 
 Do not run the standalone serial bridge beside the detector. The detector uses
 the same bridge implementation and must be the sole owner of `/dev/ttyUSB0`
