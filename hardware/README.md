@@ -54,12 +54,19 @@ readable during migration.
 ### Jetson-to-Arduino commands
 
 ```text
+JETSON_ONLINE
+JETSON_OFFLINE
 SERVO_STOP
 SERVO_SCAN
 SERVO_ANGLE:90
 RESET_SYSTEM
 TRIGGER_STROBE
 ```
+
+The firmware boots with Jetson control offline, the strobe off, and the servo
+parked at 90 degrees. `vision/detector.py` sends `JETSON_ONLINE` after opening
+serial and `JETSON_OFFLINE` during shutdown. This prevents a Nano reset caused
+by closing USB serial from restarting radar-driven scanning after `Ctrl+C`.
 
 The Arduino reports its actual held position as `STATE:SERVO_ANGLE:<angle>` so
 vision begins closed-loop steering from the physical sweep position instead of

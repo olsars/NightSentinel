@@ -61,6 +61,18 @@ class SerialBridgeParserTests(unittest.TestCase):
         self.assertEqual(reading["sensor"], "servo")
         self.assertEqual(reading["angle"], 87)
 
+    def test_jetson_online_state(self):
+        reading = parse_message("STATE:JETSON_ONLINE:1")
+
+        self.assertEqual(reading["sensor"], "control")
+        self.assertTrue(reading["jetson_online"])
+
+    def test_jetson_offline_state(self):
+        reading = parse_message("STATE:JETSON_ONLINE:0")
+
+        self.assertEqual(reading["sensor"], "control")
+        self.assertFalse(reading["jetson_online"])
+
     def test_radar_event(self):
         reading = parse_message("EVENT:RADAR_TRIPPED")
 

@@ -41,6 +41,7 @@ UltrasonicSensor ultrasonic(
 bool systemActive = false;
 bool sweepEnabled = true;
 bool darkMode = false;
+bool jetsonOnline = false;
 unsigned long activationTime = 0;
 int currentServoAngle = 90;
 
@@ -113,8 +114,35 @@ void fireDeterrentSequence() {
 }
 
 void handleCommand(const String &command) {
-  if (command != "RESET_SYSTEM" &&
-      !updateDarkMode(analogRead(ldrPin))) {
+  if (command == "JETSON_ONLINE") {
+    jetsonOnline = true;
+    resetSystem();
+    Serial.println(F("[ACK] Jetson control online."));
+    Serial.println(F("STATE:JETSON_ONLINE:1"));
+    return;
+  }
+
+  if (command == "JETSON_OFFLINE") {
+    jetsonOnline = false;
+    resetSystem();
+    Serial.println(F("[ACK] Jetson control offline; servo parked."));
+    Serial.println(F("STATE:JETSON_ONLINE:0"));
+    return;
+  }
+
+  if (command == "RESET_SYSTEM") {
+    resetSystem();
+    Serial.println(F("[ACK] System reset to standby."));
+    return;
+  }
+
+  if (!jetsonOnline) {
+    Serial.println(F("[NACK] Command requires JETSON_ONLINE."));
+    resetSystem();
+    return;
+  }
+
+  if (!updateDarkMode(analogRead(ldrPin))) {
     Serial.println(F("[NACK] Command blocked by daylight."));
     resetSystem();
     return;
@@ -158,9 +186,6 @@ void handleCommand(const String &command) {
     Serial.println(currentServoAngle);
     Serial.print(F("STATE:SERVO_ANGLE:"));
     Serial.println(currentServoAngle);
-  } else if (command == "RESET_SYSTEM") {
-    resetSystem();
-    Serial.println(F("[ACK] System reset to standby."));
   } else if (command.length() > 0) {
     Serial.print(F("[NACK] Unknown command: "));
     Serial.println(command);
@@ -221,6 +246,7 @@ void setup() {
   ultrasonic.begin();
 
   Serial.println(F("--- NightSentinel Hardware: Jetson-authorized deterrent mode ---"));
+  Serial.println(F("STATE:JETSON_ONLINE:0"));
 }
 
 void loop() {
@@ -245,10 +271,19 @@ void loop() {
     return;
   }
 
+  // The Nano may reset when the USB serial connection closes. Defaulting to
+  // offline ensures that Ctrl+C or a disconnected Jetson always parks the
+  // camera instead of allowing radar to restart an autonomous sweep.
+  pollSerialCommand();
+  if (!jetsonOnline) {
+    resetSystem();
+    delay(50);
+    return;
+  }
+
   // Distance is supplementary information only. UltrasonicSensor emits the
   // standardized DISTANCE_CM and proximity state-change messages.
   ultrasonic.update();
-  pollSerialCommand();
 
   if (digitalRead(radarOutPin) == HIGH && !systemActive) {
     systemActive = true;

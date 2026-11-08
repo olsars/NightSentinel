@@ -112,9 +112,9 @@ def main():
             bridge = None
             return False
 
-    # Release the parked shutdown state. If radar is already active, the
-    # firmware can immediately begin its normal sweep again.
-    send_arduino_command("RESET_SYSTEM")
+    # The firmware boots parked and only allows radar scanning while the
+    # Jetson detector explicitly owns control.
+    send_arduino_command("JETSON_ONLINE")
 
     print("[NightSentinel] Starting vision system...")
     print(f"[NightSentinel] Camera source: {CAMERA_SOURCE}")
@@ -347,13 +347,9 @@ def main():
 
         if bridge is not None:
             try:
-                # RESET_SYSTEM guarantees the active-low strobe is off. The
-                # following commands center and hold the servo so a lingering
-                # radar signal cannot restart the autonomous sweep after the
-                # Jetson process has exited.
-                bridge.send_command("RESET_SYSTEM")
-                bridge.send_command("SERVO_STOP")
-                bridge.send_command("SERVO_ANGLE:90")
+                # This parks the servo and disables radar-driven scanning.
+                # If closing USB resets the Nano, it also boots offline.
+                bridge.send_command("JETSON_OFFLINE")
             except (SerialBridgeError, ValueError):
                 pass
             bridge.close()

@@ -19,6 +19,7 @@ LEGACY_JSN_DISTANCE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SERVO_ANGLE_PATTERN = re.compile(r"^STATE:SERVO_ANGLE:(\d+)$")
+JETSON_ONLINE_PATTERN = re.compile(r"^STATE:JETSON_ONLINE:([01])$")
 
 EVENTS = {
     "EVENT:RADAR_TRIPPED": ("mmwave", "radar_tripped"),
@@ -87,6 +88,14 @@ def parse_message(message):
         return {
             "sensor": "servo",
             "angle": int(servo_match.group(1)),
+            "timestamp": utc_timestamp(),
+        }
+
+    jetson_match = JETSON_ONLINE_PATTERN.fullmatch(normalized)
+    if jetson_match:
+        return {
+            "sensor": "control",
+            "jetson_online": jetson_match.group(1) == "1",
             "timestamp": utc_timestamp(),
         }
 
