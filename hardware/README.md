@@ -1,97 +1,118 @@
 # NightSentinel hardware
 
-## JSN-SR04T ultrasonic sensor
+## Confirmed Arduino Nano pin map
 
-This integration assumes a JSN-SR04T revision that supports the conventional
-TRIG/ECHO interface. Confirm the module revision and inspect the repaired
-wiring before applying power; USB detection alone does not establish that the
-circuit is safe.
+The integrated firmware currently uses:
 
-Initial wiring assumption:
+| Component | Arduino Nano pin |
+| --- | --- |
+| mmWave radar OUT | D4 |
+| MG996R servo signal | D5 |
+| Active-low relay input | D7 |
+| JSN-SR04T TRIG | D8 |
+| JSN-SR04T ECHO | D9 |
+| LDR voltage divider | A0 |
 
-| JSN-SR04T | Arduino Nano | Notes |
-| --- | --- | --- |
-| VCC | 5V | Confirm against the exact module revision. |
-| GND | GND | All logic must share a common ground. |
-| TRIG | D6 | Configurable in the constructor. |
-| ECHO | D7 | Configurable in the constructor. |
+D7 is not available for ultrasonic ECHO because it controls the relay. The
+servo and strobe must use correctly rated external power/driver hardware with
+a common ground; do not power either load directly from an Arduino GPIO.
+Inspect the repaired wiring before applying power.
 
-The existing isolated servo sketch uses D5. The integrated firmware files are
-currently empty, so D6/D7 cannot yet be confirmed against the teammate's real
-mmWave, LDR, relay, and warning-light pin map. Do not power the MG996R servo or
-a strobe directly from an Arduino GPIO; use correctly rated external power and
-driver hardware with a common ground.
+## Ultrasonic behavior
 
-`ultrasonic.h` defaults to a 250 ms measurement interval, a nominal 25-450 cm
-accepted range, and a 30 ms echo timeout. These range values are provisional
-until the exact sensor revision is identified. Scheduling is nonblocking
-between samples, but Arduino `pulseIn()` can block for up to the configured
-timeout during a sample.
+`ultrasonic.h` uses a 250 ms interval, a provisional 25-450 cm valid range,
+and a 30 ms `pulseIn()` timeout. Scheduling is nonblocking between samples,
+but `pulseIn()` can block for up to that timeout during a measurement.
 
 Three consecutive valid readings at or below 100 cm confirm a near state. A
-subsequent valid reading at or above 130 cm clears it. Hysteresis prevents
-rapid state changes near the boundary. Invalid readings reset an unconfirmed
-near sequence, but do not clear an already confirmed near state; a valid clear
-reading is required.
+valid reading at or above 130 cm clears it. Invalid readings reset an
+unconfirmed sequence but do not clear an already confirmed near state.
 
-### Serial protocol
+Distance is supplementary information only. It does not classify an object as
+a person and cannot activate the strobe. Only a `TRIGGER_STROBE` command from
+the Jetson during an active, dark radar window can run the deterrent sequence.
 
-All messages use the existing 9600-baud connection:
+### Serial output protocol
 
 ```text
 DISTANCE_CM:125.5
 DISTANCE_CM:INVALID
 EVENT:PROXIMITY_NEAR
 EVENT:PROXIMITY_CLEARED
+EVENT:RADAR_TRIPPED
 ```
 
-The ultrasonic sensor only supplies proximity information. It does not
-classify an object as a person, and the bridge does not post these messages to
-the backend `/events` endpoint.
+The bridge temporarily recognizes the legacy `[JSN VERIFIED] ... cm` and
+`EVENT:JSN_TRIGGERED` messages so the currently flashed firmware remains
+readable during migration.
 
-### Standalone test sketch
+### Jetson-to-Arduino commands
 
-The repository's intended integrated firmware is empty, so
-`ultrasonic_test/ultrasonic_test.ino` is deliberately standalone. After the
-hardware teammate confirms the board, sensor revision, wiring, and pins,
-compile it from the repository root with:
+```text
+SERVO_STOP
+SERVO_SCAN
+SERVO_ANGLE:90
+RESET_SYSTEM
+TRIGGER_STROBE
+```
+
+The Arduino reports its actual held position as `STATE:SERVO_ANGLE:<angle>` so
+vision begins closed-loop steering from the physical sweep position instead of
+assuming the camera was centered when a person was acquired.
+
+Servo angles are limited to 30-150 degrees. `vision/detector.py` uses confirmed
+YOLO track IDs, a horizontal dead zone, bounded angle steps, and a 100 ms
+command interval to follow one person without excessive jitter. It returns to
+scan mode after losing the target. Set `NIGHTSENTINEL_SERVO_DIRECTION=-1` if
+physical movement is reversed.
+
+Strobe commands from vision are disabled by default. For a controlled test,
+they can be enabled with `NIGHTSENTINEL_STROBE_ENABLED=1`; even then, both a
+confirmed YOLO person and ultrasonic near state are required before the Jetson
+sends `TRIGGER_STROBE`.
+
+## Compile
+
+Compile the integrated firmware from the repository root:
 
 ```bash
-arduino-cli compile \
+/home/solars/bin/arduino-cli compile \
+  --fqbn arduino:avr:nano \
+  --build-property "compiler.cpp.extra_flags=-I$(pwd)/hardware" \
+  hardware/integrated_nightsentinel
+```
+
+Compile the isolated sensor test with:
+
+```bash
+/home/solars/bin/arduino-cli compile \
   --fqbn arduino:avr:nano \
   --build-property "compiler.cpp.extra_flags=-I$(pwd)/hardware" \
   hardware/ultrasonic_test
 ```
 
-The explicit include path is required because Arduino CLI copies the sketch to
-a temporary build directory; a relative include such as `../ultrasonic.h`
-would no longer point at the repository's canonical header from there.
+Compilation does not upload firmware. Do not upload until the Nano processor
+and bootloader variant are confirmed. Uploading replaces the currently working
+firmware.
 
-Do not upload automatically. Some Nano clones require a different processor
-or old-bootloader board option, which must be confirmed before upload.
+## Test and run
 
-When the real integrated sketch is available, add `#include "ultrasonic.h"`,
-create one `UltrasonicSensor` instance with confirmed pins, call `begin()` from
-the existing `setup()`, and call `update()` on every pass through the existing
-`loop()`. Do not add a second `setup()` or `loop()`.
-
-### Jetson serial bridge
-
-Only one process may own `/dev/ttyUSB0`. Run the bridge with real hardware:
+Only one process may own `/dev/ttyUSB0`.
 
 ```bash
-python hardware/serial_bridge.py --port /dev/ttyUSB0 --baud 9600
+./.venv/bin/python -B -m unittest discover -s tests -v
+./.venv/bin/python -B hardware/serial_bridge.py --simulate
+./.venv/bin/python -B hardware/serial_bridge.py \
+  --port /dev/ttyUSB0 --baud 9600
 ```
 
-Run realistic messages without hardware and execute the parser tests with:
+Run vision with tracking and strobe disabled:
 
 ```bash
-python hardware/serial_bridge.py --simulate
-python -m unittest discover -s tests -v
+NIGHTSENTINEL_STROBE_ENABLED=0 \
+./.venv/bin/python -B vision/detector.py
 ```
 
-Before the physical demonstration, the hardware teammate must confirm the
-sensor revision, repaired wiring, final pin map, Nano variant/bootloader, power
-arrangement, and successful bench readings. The backend team can later approve
-a rate-limited latest-reading API such as `GET /sensor-readings`; storing every
-250 ms sample in SQLite is intentionally out of scope.
+Do not run the standalone serial bridge beside the detector. The detector uses
+the same bridge implementation and must be the sole owner of `/dev/ttyUSB0`
+while tracking.

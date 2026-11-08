@@ -13,11 +13,19 @@ DISTANCE_PATTERN = re.compile(
     r"^DISTANCE_CM:([+-]?(?:\d+(?:\.\d*)?|\.\d+))$",
     re.IGNORECASE,
 )
+LEGACY_JSN_DISTANCE_PATTERN = re.compile(
+    r"\[JSN VERIFIED\]\s+Confirmed target at\s+"
+    r"(\d+(?:\.\d+)?)\s*cm\.?",
+    re.IGNORECASE,
+)
+SERVO_ANGLE_PATTERN = re.compile(r"^STATE:SERVO_ANGLE:(\d+)$")
 
 EVENTS = {
     "EVENT:RADAR_TRIPPED": ("mmwave", "radar_tripped"),
     "EVENT:PROXIMITY_NEAR": ("ultrasonic", "proximity_near"),
     "EVENT:PROXIMITY_CLEARED": ("ultrasonic", "proximity_cleared"),
+    # Compatibility with the firmware that preceded the standardized protocol.
+    "EVENT:JSN_TRIGGERED": ("ultrasonic", "proximity_near"),
 }
 
 
@@ -66,6 +74,22 @@ def parse_message(message):
             "timestamp": utc_timestamp(),
         }
 
+    legacy_match = LEGACY_JSN_DISTANCE_PATTERN.search(normalized)
+    if legacy_match:
+        return {
+            "sensor": "ultrasonic",
+            "distance_cm": float(legacy_match.group(1)),
+            "timestamp": utc_timestamp(),
+        }
+
+    servo_match = SERVO_ANGLE_PATTERN.fullmatch(normalized)
+    if servo_match:
+        return {
+            "sensor": "servo",
+            "angle": int(servo_match.group(1)),
+            "timestamp": utc_timestamp(),
+        }
+
     match = LIGHT_PATTERN.search(normalized)
 
     if match:
@@ -90,32 +114,98 @@ def process_message(message):
     return reading
 
 
+class SerialBridgeError(Exception):
+    """Raised when the single Arduino serial connection fails."""
+
+
+class ArduinoSerialBridge:
+    """Own the bidirectional Arduino connection for one process."""
+
+    def __init__(self, port="/dev/ttyUSB0", baud=9600, timeout=0):
+        try:
+            import serial
+        except ImportError as error:
+            raise SerialBridgeError("pyserial is not installed") from error
+
+        self._serial = serial
+        try:
+            self._connection = serial.Serial(port, baud, timeout=timeout)
+        except (serial.SerialException, OSError) as error:
+            raise SerialBridgeError(f"{port}: {error}") from error
+
+        self.port = port
+        self._receive_buffer = bytearray()
+
+    @property
+    def in_waiting(self):
+        try:
+            return self._connection.in_waiting
+        except (self._serial.SerialException, OSError) as error:
+            raise SerialBridgeError(f"{self.port}: {error}") from error
+
+    def read_message(self):
+        try:
+            raw_message = self._connection.readline()
+        except (self._serial.SerialException, OSError) as error:
+            raise SerialBridgeError(f"{self.port}: {error}") from error
+
+        return raw_message.decode("utf-8", errors="replace").strip()
+
+    def poll(self):
+        """Parse all complete messages currently buffered by the Arduino."""
+        readings = []
+        available = self.in_waiting
+        if available > 0:
+            try:
+                self._receive_buffer.extend(self._connection.read(available))
+            except (self._serial.SerialException, OSError) as error:
+                raise SerialBridgeError(f"{self.port}: {error}") from error
+
+        while b"\n" in self._receive_buffer:
+            raw_message, _, remaining = self._receive_buffer.partition(b"\n")
+            self._receive_buffer = bytearray(remaining)
+            message = raw_message.decode("utf-8", errors="replace").strip()
+            if not message:
+                continue
+            reading = process_message(message)
+            if reading:
+                readings.append(reading)
+        return readings
+
+    def send_command(self, command):
+        normalized = command.strip()
+        if not normalized or "\n" in normalized or "\r" in normalized:
+            raise ValueError("serial command must be one non-empty line")
+
+        try:
+            self._connection.write(f"{normalized}\n".encode("ascii"))
+            self._connection.flush()
+        except (self._serial.SerialException, OSError) as error:
+            raise SerialBridgeError(f"{self.port}: {error}") from error
+
+    def close(self):
+        if self._connection.is_open:
+            self._connection.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exc_type, _exc_value, _traceback):
+        self.close()
+
+
 def run_serial(port, baud):
     try:
-        import serial
-    except ImportError:
-        print(
-            "[SERIAL ERROR] pyserial is not installed; use --simulate or "
-            "install pyserial.",
-            file=sys.stderr,
-        )
-        return 1
-
-    try:
         # This bridge must be the only process opening the Arduino serial port.
-        with serial.Serial(port, baud, timeout=2) as connection:
+        with ArduinoSerialBridge(port, baud, timeout=2) as bridge:
             print(f"[CONNECTED] {port}")
 
             while True:
-                raw_message = connection.readline()
-                message = raw_message.decode(
-                    "utf-8", errors="replace"
-                ).strip()
-
+                message = bridge.read_message()
                 if message:
                     process_message(message)
-    except (serial.SerialException, OSError) as error:
-        print(f"[SERIAL ERROR] {port}: {error}", file=sys.stderr)
+    except SerialBridgeError as error:
+        print(f"[SERIAL ERROR] {error}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         print("\n[DISCONNECTED] Serial bridge stopped.")

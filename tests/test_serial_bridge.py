@@ -1,7 +1,24 @@
 import unittest
 from datetime import datetime
 
-from hardware.serial_bridge import parse_message
+from hardware.serial_bridge import ArduinoSerialBridge, parse_message
+
+
+class FakeSerialConnection:
+    def __init__(self):
+        self.buffer = bytearray()
+
+    @property
+    def in_waiting(self):
+        return len(self.buffer)
+
+    def feed(self, data):
+        self.buffer.extend(data)
+
+    def read(self, size):
+        data = bytes(self.buffer[:size])
+        del self.buffer[:size]
+        return data
 
 
 class SerialBridgeParserTests(unittest.TestCase):
@@ -23,6 +40,26 @@ class SerialBridgeParserTests(unittest.TestCase):
         self.assertIsNone(reading["distance_cm"])
         self.assertFalse(reading["valid"])
         self.assert_utc_timestamp(reading)
+
+    def test_legacy_jsn_distance_message(self):
+        reading = parse_message(
+            "[JSN VERIFIED] Confirmed target at 73 cm."
+        )
+
+        self.assertEqual(reading["sensor"], "ultrasonic")
+        self.assertEqual(reading["distance_cm"], 73.0)
+
+    def test_legacy_jsn_event(self):
+        reading = parse_message("EVENT:JSN_TRIGGERED")
+
+        self.assertEqual(reading["sensor"], "ultrasonic")
+        self.assertEqual(reading["event_type"], "proximity_near")
+
+    def test_servo_angle_state(self):
+        reading = parse_message("STATE:SERVO_ANGLE:87")
+
+        self.assertEqual(reading["sensor"], "servo")
+        self.assertEqual(reading["angle"], 87)
 
     def test_radar_event(self):
         reading = parse_message("EVENT:RADAR_TRIPPED")
@@ -74,6 +111,22 @@ class SerialBridgeParserTests(unittest.TestCase):
         for message in malformed_messages:
             with self.subTest(message=message):
                 self.assertIsNone(parse_message(message))
+
+    def test_nonblocking_poll_preserves_partial_lines(self):
+        connection = FakeSerialConnection()
+        bridge = ArduinoSerialBridge.__new__(ArduinoSerialBridge)
+        bridge._connection = connection
+        bridge._receive_buffer = bytearray()
+        bridge.port = "/dev/test"
+        bridge._serial = type("FakeSerial", (), {"SerialException": OSError})
+
+        connection.feed(b"DISTANCE_CM:12")
+        self.assertEqual(bridge.poll(), [])
+
+        connection.feed(b"5.5\n")
+        readings = bridge.poll()
+        self.assertEqual(len(readings), 1)
+        self.assertEqual(readings[0]["distance_cm"], 125.5)
 
 
 if __name__ == "__main__":

@@ -5,14 +5,14 @@
 
 // JSN-SR04T trigger/echo driver for the Arduino Nano (ATmega328P).
 //
-// Defaults assume TRIG on D6 and ECHO on D7. Pass different pins to the
-// constructor if the integrated firmware or final wiring uses those pins.
+// Defaults match the confirmed integrated wiring: TRIG on D8 and ECHO on D9.
+// Pass different pins to the constructor for a different installation.
 // update() schedules readings with millis(), but pulseIn() can still block for
 // up to echoTimeoutUs (30 ms by default) while it waits for an echo.
 class UltrasonicSensor {
  public:
-  UltrasonicSensor(uint8_t triggerPin = 6,
-                   uint8_t echoPin = 7,
+  UltrasonicSensor(uint8_t triggerPin = 8,
+                   uint8_t echoPin = 9,
                    unsigned long measurementIntervalMs = 250UL,
                    float nearThresholdCm = 100.0f,
                    float clearThresholdCm = 130.0f,
