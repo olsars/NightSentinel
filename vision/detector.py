@@ -4,57 +4,67 @@ NightSentinel - Vision Detection Module
 
 Hardware: NVIDIA Jetson Orin Nano + Logitech C920
 Model: YOLO11 Nano
-Tracking: ByteTrack
+Tracker: ByteTrack
 
-Detects people from a live camera feed and assigns
-temporary tracking IDs to detected individuals.
+Features:
+- Real-time person detection
+- GPU-accelerated inference
+- Persistent tracking IDs across frames
+- Automatic backend event notifications
+- Duplicate alert prevention
 """
 
 from ultralytics import YOLO
+from events import send_event
 
 
 def main():
     # Load the pretrained YOLO11 Nano model.
-    # Ultralytics downloads the weights if they aren't available.
     model = YOLO("yolo11n.pt")
+
+    # Store IDs that have already generated successful alerts.
+    # This prevents repeated notifications for the same tracked person.
+    alerted_tracks = set()
 
     print("[NightSentinel] Starting vision system...")
 
-    # Run person detection and tracking on the Jetson GPU.
+    # Start live camera detection and tracking.
     #
-    # source=0: USB camera at /dev/video0
-    # device=0: NVIDIA GPU (CUDA device 0)
+    # source=0: Logitech C920 at /dev/video0
+    # device=0: NVIDIA Jetson GPU
     # classes=[0]: Detect people only
-    # conf=0.5: Minimum detection confidence of 50%
-    # tracker: ByteTrack assigns temporary IDs
-    # stream=True: Process frames continuously
-    # show=False: No graphical window required
+    # conf=0.5: Minimum 50% detection confidence
+    # tracker: ByteTrack tracking algorithm
+    # persist=True: Keep tracker state across frames
+    # stream=True: Process video frames continuously
+    # show=False: Don't open a graphical window
     results = model.track(
         source=0,
         device=0,
         classes=[0],
         conf=0.5,
         tracker="bytetrack.yaml",
+        persist=True,
         stream=True,
         show=False,
         verbose=False,
     )
 
     try:
-        # Each result represents one processed camera frame.
+        # Process each frame received from the camera.
         for result in results:
 
-            # Boxes contain detected objects in the frame.
+            # Skip frames without detected objects.
             if result.boxes is None:
                 continue
 
-            # Read each detected person's bounding box.
+            # Process every detected person.
             for box in result.boxes:
 
-                # Confidence is a PyTorch tensor.
+                # Read the model's confidence score.
                 confidence = float(box.conf.item())
 
-                # Tracking IDs may be unavailable in early frames.
+                # A tracking ID may not be available immediately.
                 if box.id is None:
                     continue
 
@@ -66,12 +76,31 @@ def main():
                     f"Confidence: {confidence:.2f}"
                 )
 
+                # Only alert the backend once per tracked person.
+                if track_id not in alerted_tracks:
+
+                    print(
+                        f"[ALERT] New person detected: "
+                        f"Track ID {track_id}"
+                    )
+
+                    # Send the detection event to FastAPI.
+                    success = send_event(
+                        track_id=track_id,
+                        event_type="person_detected",
+                        zone="front_door",
+                    )
+
+                    # Remember this ID only after a successful request.
+                    if success:
+                        alerted_tracks.add(track_id)
+
     except KeyboardInterrupt:
-        # Allow the operator to stop detection with Ctrl+C.
+        # Stop cleanly when Ctrl+C is pressed.
         print("\n[NightSentinel] Stopping vision system...")
 
     finally:
-        # Release the camera when the program exits.
+        # Close the video stream and release camera resources.
         if hasattr(results, "close"):
             results.close()
 
