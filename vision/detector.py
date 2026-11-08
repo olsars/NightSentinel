@@ -105,6 +105,10 @@ def main():
             bridge = None
             return False
 
+    # Release the parked shutdown state. If radar is already active, the
+    # firmware can immediately begin its normal sweep again.
+    send_arduino_command("RESET_SYSTEM")
+
     print("[NightSentinel] Starting vision system...")
     print(f"[NightSentinel] Camera source: {CAMERA_SOURCE}")
     print(
@@ -331,8 +335,14 @@ def main():
 
         if bridge is not None:
             try:
+                # RESET_SYSTEM guarantees the active-low strobe is off. The
+                # following commands center and hold the servo so a lingering
+                # radar signal cannot restart the autonomous sweep after the
+                # Jetson process has exited.
                 bridge.send_command("RESET_SYSTEM")
-            except SerialBridgeError:
+                bridge.send_command("SERVO_STOP")
+                bridge.send_command("SERVO_ANGLE:90")
+            except (SerialBridgeError, ValueError):
                 pass
             bridge.close()
 
