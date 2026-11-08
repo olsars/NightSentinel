@@ -24,6 +24,10 @@ const int SWEEP_MAX = 150;
 const int SWEEP_STEP = 7;
 const unsigned long SWEEP_DELAY_MS = 130UL;
 const unsigned long ACTIVE_TIMEOUT_MS = 10000UL;
+const uint8_t STROBE_BURST_COUNT = 4;
+const uint8_t STROBE_STEP_COUNT = 11;
+const unsigned int STROBE_STEP_MS[STROBE_STEP_COUNT] = {
+    80, 50, 80, 60, 150, 70, 60, 60, 60, 60, 100};
 
 Servo scannerServo;
 UltrasonicSensor ultrasonic(
@@ -44,6 +48,11 @@ bool darkMode = false;
 bool jetsonOnline = false;
 unsigned long activationTime = 0;
 int currentServoAngle = 90;
+bool strobeActive = false;
+uint8_t strobeBurst = 0;
+uint8_t strobeStep = 0;
+unsigned long strobeStepStartedAt = 0;
+unsigned int strobeStepDurationMs = 0;
 
 void stopStrobe() {
   digitalWrite(relayPin, HIGH);
@@ -55,6 +64,7 @@ void setServoAngle(int angle) {
 }
 
 void resetSystem() {
+  strobeActive = false;
   systemActive = false;
   sweepEnabled = true;
   setServoAngle(90);
@@ -72,51 +82,84 @@ bool updateDarkMode(int lightLevel) {
   return darkMode;
 }
 
-// This is called only after the Jetson sends TRIGGER_STROBE. Radar or
-// ultrasonic proximity alone must never authorize the deterrent.
-void fireDeterrentSequence() {
-  Serial.println(F("[DETERRENT] Jetson-authorized strobe sequence started."));
+void setStrobeOutputForStep(uint8_t step) {
+  // Steps alternate active-low ON and OFF. The final step is an OFF gap.
+  digitalWrite(relayPin, step < 10 && step % 2 == 0 ? LOW : HIGH);
+}
 
-  for (int burst = 0; burst < 4; ++burst) {
-    if (!updateDarkMode(analogRead(ldrPin))) {
-      Serial.println(F("[DAYTIME OVERRIDE] Strobe aborted."));
-      resetSystem();
+void finishDeterrentSequence(bool aborted) {
+  stopStrobe();
+  strobeActive = false;
+  activationTime = millis();
+
+  if (aborted) {
+    Serial.println(F("EVENT:STROBE_ABORTED"));
+  } else {
+    Serial.println(F("EVENT:STROBE_COMPLETE"));
+  }
+
+  // The servo stays at the last tracked angle so vision can continue without
+  // the Nano and Jetson disagreeing about its physical position.
+  Serial.print(F("STATE:SERVO_ANGLE:"));
+  Serial.println(currentServoAngle);
+}
+
+// Start a non-blocking deterrent sequence. loop() continues polling serial,
+// sensors, and safety state while the relay timing advances with millis().
+void startDeterrentSequence() {
+  Serial.println(F("[DETERRENT] Jetson-authorized strobe sequence started."));
+  Serial.println(F("EVENT:STROBE_STARTED"));
+  strobeActive = true;
+  strobeBurst = 0;
+  strobeStep = 0;
+  strobeStepStartedAt = millis();
+  strobeStepDurationMs = STROBE_STEP_MS[0];
+  setStrobeOutputForStep(0);
+}
+
+void updateDeterrentSequence() {
+  if (!strobeActive) {
+    return;
+  }
+
+  if (millis() - strobeStepStartedAt < strobeStepDurationMs) {
+    return;
+  }
+
+  ++strobeStep;
+  if (strobeStep >= STROBE_STEP_COUNT) {
+    ++strobeBurst;
+    if (strobeBurst >= STROBE_BURST_COUNT) {
+      finishDeterrentSequence(false);
       return;
     }
 
-    digitalWrite(relayPin, LOW);
-    delay(80);
-    digitalWrite(relayPin, HIGH);
-    delay(50);
-
-    digitalWrite(relayPin, LOW);
-    delay(80);
-    digitalWrite(relayPin, HIGH);
-    delay(60);
-
-    digitalWrite(relayPin, LOW);
-    delay(150);
-    digitalWrite(relayPin, HIGH);
-    delay(70);
-
-    digitalWrite(relayPin, LOW);
-    delay(60);
-    digitalWrite(relayPin, HIGH);
-    delay(60);
-    digitalWrite(relayPin, LOW);
-    delay(60);
-    digitalWrite(relayPin, HIGH);
-
-    delay(random(100, 250));
+    if (!updateDarkMode(analogRead(ldrPin))) {
+      Serial.println(F("[DAYTIME OVERRIDE] Strobe aborted."));
+      finishDeterrentSequence(true);
+      return;
+    }
+    strobeStep = 0;
   }
 
-  stopStrobe();
+  strobeStepStartedAt = millis();
+  strobeStepDurationMs = strobeStep == 10
+      ? static_cast<unsigned int>(random(100, 250))
+      : STROBE_STEP_MS[strobeStep];
+  setStrobeOutputForStep(strobeStep);
 }
 
 void handleCommand(const String &command) {
   if (command == "JETSON_ONLINE") {
     jetsonOnline = true;
     resetSystem();
+    if (updateDarkMode(analogRead(ldrPin))) {
+      // Perform one immediate nighttime scan instead of waiting for the first
+      // radar transition. Normal radar gating resumes after the timeout.
+      systemActive = true;
+      sweepEnabled = true;
+      activationTime = millis();
+    }
     Serial.println(F("[ACK] Jetson control online."));
     Serial.println(F("STATE:JETSON_ONLINE:1"));
     return;
@@ -148,6 +191,11 @@ void handleCommand(const String &command) {
     return;
   }
 
+  if (strobeActive) {
+    Serial.println(F("[BUSY] Strobe active; command ignored."));
+    return;
+  }
+
   if (command == "TRIGGER_STROBE") {
     if (!systemActive) {
       Serial.println(F("[NACK] TRIGGER_STROBE requires an active radar window."));
@@ -156,8 +204,7 @@ void handleCommand(const String &command) {
 
     Serial.println(F("[ACK] Jetson person confirmation accepted."));
     sweepEnabled = false;
-    fireDeterrentSequence();
-    resetSystem();
+    startDeterrentSequence();
   } else if (command == "SERVO_STOP") {
     systemActive = true;
     sweepEnabled = false;
@@ -284,6 +331,12 @@ void loop() {
   // Distance is supplementary information only. UltrasonicSensor emits the
   // standardized DISTANCE_CM and proximity state-change messages.
   ultrasonic.update();
+
+  if (strobeActive) {
+    updateDeterrentSequence();
+    delay(2);
+    return;
+  }
 
   if (digitalRead(radarOutPin) == HIGH && !systemActive) {
     systemActive = true;

@@ -45,6 +45,9 @@ DISTANCE_CM:INVALID
 EVENT:PROXIMITY_NEAR
 EVENT:PROXIMITY_CLEARED
 EVENT:RADAR_TRIPPED
+EVENT:STROBE_STARTED
+EVENT:STROBE_COMPLETE
+EVENT:STROBE_ABORTED
 ```
 
 The bridge temporarily recognizes the legacy `[JSN VERIFIED] ... cm` and
@@ -69,6 +72,14 @@ serial and waiting for the Nano bootloader, then sends `JETSON_OFFLINE` during
 shutdown. This prevents a Nano reset caused by closing USB serial from
 restarting radar-driven scanning after `Ctrl+C`. The boot wait defaults to 2.5
 seconds and can be overridden with `NIGHTSENTINEL_ARDUINO_BOOT_DELAY`.
+
+At night, `JETSON_ONLINE` starts one immediate scan so startup does not wait
+for a new radar transition. The normal radar gate resumes after the active
+window times out. The strobe sequence uses a `millis()` state machine rather
+than blocking delays, allowing the Arduino to keep servicing serial and safety
+state while the relay is flashing. Vision pauses angle commands between the
+strobe start and completion events, then resumes from the physical angle
+reported by the Arduino.
 
 The Arduino reports its actual held position as `STATE:SERVO_ANGLE:<angle>` so
 vision begins closed-loop steering from the physical sweep position instead of

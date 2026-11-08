@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en" class="intro-pending">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101b31">
+  <title>NightSentinel Command Center</title>
+  <meta name="description" content="Live NightSentinel perimeter monitoring dashboard">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+  <noscript><style>.signal-intro{display:none}html.intro-pending .topbar,html.intro-pending main,html.intro-pending footer{opacity:1}</style></noscript>
+</head>
+<body>
+  <svg class="svg-defs" aria-hidden="true">
+    <symbol id="sentinel-symbol" viewBox="0 0 100 100">
+      <path class="symbol-orbit" d="M73 19A38 38 0 1 0 82 70" />
+      <path class="symbol-n" d="M31 70V31l38 39V31" />
+      <path class="symbol-scan" d="M51 50 82 28" />
+      <circle class="symbol-point" cx="82" cy="28" r="4" />
+    </symbol>
+  </svg>
+
+  <div class="signal-intro" id="signal-intro" role="status" aria-label="NightSentinel is waking up">
+    <div class="intro-stars" aria-hidden="true"></div>
+    <div class="signal-cloud cloud-one" aria-hidden="true"></div>
+    <div class="signal-cloud cloud-two" aria-hidden="true"></div>
+    <div class="signal-beam" aria-hidden="true"></div>
+    <div class="signal-disc" aria-hidden="true">
+      <svg viewBox="0 0 100 100"><use href="#sentinel-symbol"></use></svg>
+    </div>
+    <div class="intro-title"><strong>NIGHT<span>SENTINEL</span></strong><small>THE GUARDIAN IS ONLINE</small></div>
+    <button class="skip-intro" id="skip-intro" type="button">Skip intro</button>
+  </div>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="NightSentinel home">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 100 100"><use href="#sentinel-symbol"></use></svg></span>
+      <span class="wordmark"><strong>Night<span>Sentinel</span></strong><small>Autonomous perimeter intelligence</small></span>
+    </a>
+    <div class="topbar-meta">
+      <div class="clock"><span id="current-date">—</span><strong id="current-time">—</strong></div>
+      <div class="status-pill" id="overall-status" data-state="checking"><i></i><span>Checking system</span></div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span>NIGHT PROTOCOL</span> / EDGE INTELLIGENCE</p>
+        <h1 id="hero-title">The night has<br><span>a guardian.</span></h1>
+        <p>NightSentinel sees, tracks, and verifies a person locally—then responds only when vision and sensors agree.</p>
+        <div class="hero-motto"><span></span><strong>SEE</strong><i></i><strong>VERIFY</strong><i></i><strong>DETER</strong></div>
+      </div>
+      <div class="hero-scene" aria-hidden="true">
+        <div class="hero-moon"><svg viewBox="0 0 100 100"><use href="#sentinel-symbol"></use></svg></div>
+        <span class="scan-ring ring-one"></span><span class="scan-ring ring-two"></span>
+        <div class="watch-post"><span class="camera-head"><i></i></span><span class="camera-neck"></span><span class="camera-base"></span></div>
+        <span class="horizon-line"></span>
+      </div>
+      <div class="hero-readout">
+        <div><small>VISION MODE</small><strong>PERSON TRACKING</strong></div>
+        <div><small>SENSOR FUSION</small><strong>4 SIGNALS</strong></div>
+        <div><small>PROCESSING</small><strong>LOCAL / JETSON</strong></div>
+      </div>
+    </section>
+
+    <section class="primary-grid">
+      <article class="panel camera-panel">
+        <header class="panel-header">
+          <div><p class="kicker">CAM 01 · FRONT DOOR</p><h2>Live perimeter feed</h2></div>
+          <div class="status-pill compact" id="camera-status" data-state="checking"><i></i><span>Connecting</span></div>
+        </header>
+        <div class="camera-frame" id="camera-frame">
+          <img id="camera-feed" alt="Live annotated NightSentinel camera feed">
+          <div class="camera-placeholder" id="camera-placeholder"><span class="reticle"></span><strong>Waiting for camera stream</strong><small>Start detector.py with streaming enabled.</small></div>
+          <div class="feed-overlay top"><span>YOLO · PERSON CLASS</span><span>LIVE</span></div>
+          <div class="feed-overlay bottom"><span id="camera-address">JETSON:8080</span><span>SAFE SERVO LIMITS 30°–150°</span></div>
+        </div>
+      </article>
+
+      <aside class="side-stack">
+        <article class="panel readiness">
+          <header class="panel-header compact-header"><div><p class="kicker">SYSTEM READINESS</p><h2>Sensor network</h2></div></header>
+          <div class="readiness-list">
+            <div class="ready-row"><span class="round-icon">API</span><div><strong>Jetson API</strong><small>Events and dashboard</small></div><em id="api-state" data-state="checking">Checking</em></div>
+            <div class="ready-row"><span class="round-icon">CAM</span><div><strong>Camera stream</strong><small>Annotated C920 feed</small></div><em id="stream-state" data-state="checking">Checking</em></div>
+            <div class="ready-row"><span class="round-icon">SAFE</span><div><strong>Safety interlock</strong><small>Person + range + darkness</small></div><em data-state="online">Armed</em></div>
+          </div>
+        </article>
+
+        <article class="panel latest">
+          <p class="kicker">LATEST DETECTION</p>
+          <div class="latest-main"><strong id="latest-event-type">No detections</strong><span id="latest-event-time">Waiting for a verified event</span></div>
+          <div class="latest-meta"><div><small>ZONE</small><strong id="latest-zone">—</strong></div><div><small>TRACK</small><strong id="latest-track">—</strong></div></div>
+        </article>
+
+        <article class="panel event-count">
+          <div><p class="kicker">SESSION RECORDS</p><strong id="event-count">0</strong></div>
+          <div class="bars" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+        </article>
+      </aside>
+    </section>
+
+    <section class="panel events-panel">
+      <header class="panel-header">
+        <div><p class="kicker">VERIFIED ACTIVITY</p><h2>Recent events</h2></div>
+        <div class="refresh"><span id="last-refresh">Not refreshed</span><button id="refresh-button" type="button">Refresh</button></div>
+      </header>
+      <div class="events-table" aria-live="polite">
+        <div class="event-row event-head"><span>Event</span><span>Zone</span><span>Track</span><span>Priority</span><span>Time</span></div>
+        <div id="events-body"><div class="empty"><span class="reticle small"></span><strong>No verified events yet</strong><small>New person detections will appear automatically.</small></div></div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer><span>NightSentinel · Jetson edge intelligence</span><span>Private local network</span></footer>
+</body>
+</html>

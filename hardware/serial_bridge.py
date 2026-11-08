@@ -25,6 +25,9 @@ EVENTS = {
     "EVENT:RADAR_TRIPPED": ("mmwave", "radar_tripped"),
     "EVENT:PROXIMITY_NEAR": ("ultrasonic", "proximity_near"),
     "EVENT:PROXIMITY_CLEARED": ("ultrasonic", "proximity_cleared"),
+    "EVENT:STROBE_STARTED": ("deterrent", "strobe_started"),
+    "EVENT:STROBE_COMPLETE": ("deterrent", "strobe_complete"),
+    "EVENT:STROBE_ABORTED": ("deterrent", "strobe_aborted"),
     # Compatibility with the firmware that preceded the standardized protocol.
     "EVENT:JSN_TRIGGERED": ("ultrasonic", "proximity_near"),
 }

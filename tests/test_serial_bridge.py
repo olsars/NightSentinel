@@ -92,6 +92,19 @@ class SerialBridgeParserTests(unittest.TestCase):
         self.assertEqual(reading["sensor"], "ultrasonic")
         self.assertEqual(reading["event_type"], "proximity_cleared")
 
+    def test_strobe_lifecycle_events(self):
+        expected_events = {
+            "EVENT:STROBE_STARTED": "strobe_started",
+            "EVENT:STROBE_COMPLETE": "strobe_complete",
+            "EVENT:STROBE_ABORTED": "strobe_aborted",
+        }
+
+        for message, event_type in expected_events.items():
+            with self.subTest(message=message):
+                reading = parse_message(message)
+                self.assertEqual(reading["sensor"], "deterrent")
+                self.assertEqual(reading["event_type"], event_type)
+
     def test_daytime_ldr_message(self):
         reading = parse_message(
             "[DAYTIME MODE] LDR Light Level: 357 (Resting to save power)"

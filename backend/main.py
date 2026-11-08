@@ -6,6 +6,7 @@ from typing import Literal
 
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 app = FastAPI(title="NightSentinel API")
@@ -25,6 +26,7 @@ app.add_middleware(
 
 
 DB_PATH = Path(__file__).with_name("events.db")
+FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend"
 
 
 class EventInput(BaseModel):
@@ -156,4 +158,13 @@ def get_events(
 
     finally:
         conn.close()
+
+
+# Keep API routes above this mount so the Jetson serves both the dashboard and
+# its JSON API from one address without a separate frontend development server.
+app.mount(
+    "/",
+    StaticFiles(directory=FRONTEND_DIR, html=True),
+    name="frontend",
+)
 

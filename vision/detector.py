@@ -94,6 +94,7 @@ def main():
     last_servo_command_time = 0.0
     last_stream_frame_time = 0.0
     proximity_near = False
+    strobe_active = False
     preview_server = None
 
     bridge = None
@@ -180,6 +181,19 @@ def main():
                         if reading.get("sensor") == "servo":
                             current_servo_angle = reading["angle"]
                             servo_angle_known = True
+                            continue
+                        if reading.get("sensor") == "deterrent":
+                            event_type = reading.get("event_type")
+                            if event_type == "strobe_started":
+                                strobe_active = True
+                                servo_angle_known = False
+                            elif event_type in (
+                                "strobe_complete",
+                                "strobe_aborted",
+                            ):
+                                strobe_active = False
+                                # Firmware sends its physical angle next.
+                                servo_angle_known = False
                             continue
                         if reading.get("sensor") != "ultrasonic":
                             continue
@@ -338,7 +352,8 @@ def main():
 
             now = time.monotonic()
             if (
-                requested_angle != current_servo_angle
+                not strobe_active
+                and requested_angle != current_servo_angle
                 and now - last_servo_command_time
                 >= SERVO_COMMAND_INTERVAL_SECONDS
             ):
@@ -350,11 +365,14 @@ def main():
             # YOLO tracking and a confirmed ultrasonic near state.
             if (
                 STROBE_ENABLED
+                and not strobe_active
                 and proximity_near
                 and target_track_id not in strobe_tracks
             ):
                 if send_arduino_command("TRIGGER_STROBE"):
                     strobe_tracks.add(target_track_id)
+                    strobe_active = True
+                    servo_angle_known = False
 
     except KeyboardInterrupt:
         print("\n[NightSentinel] Stopping vision system...")
