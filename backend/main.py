@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -62,13 +62,45 @@ def health_check():
     }
 
 
+
 @app.post("/events", status_code=201)
-def create_event(event: EventInput):
-    priority = "high" if event.event_type == "restricted_zone_entry" else "low"
-    timestamp = datetime.now(timezone.utc).isoformat()
+def create_event(event: EventInput, response: Response):
+    now = datetime.now(timezone.utc)
 
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+
     try:
+        previous = conn.execute(
+            """
+            SELECT * FROM events
+            WHERE track_id = ?
+            AND event_type = ?
+            AND zone = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (event.track_id, event.event_type, event.zone)
+        ).fetchone()
+
+        if previous:
+            last_time = datetime.fromisoformat(
+                previous["timestamp"]
+            )
+            seconds = (now - last_time).total_seconds()
+
+            if 0 <= seconds < 15:
+                response.status_code = 200
+                return dict(previous)
+
+        priority = (
+            "high"
+            if event.event_type == "restricted_zone_entry"
+            else "low"
+        )
+
+        timestamp = now.isoformat()
+
         cursor = conn.execute(
             """
             INSERT INTO events
@@ -83,29 +115,45 @@ def create_event(event: EventInput):
                 timestamp
             )
         )
+
         conn.commit()
-        event_id = cursor.lastrowid
+
+        return {
+            "id": cursor.lastrowid,
+            "track_id": event.track_id,
+            "event_type": event.event_type,
+            "zone": event.zone,
+            "priority": priority,
+            "timestamp": timestamp
+        }
+
     finally:
         conn.close()
 
-    return {
-        "id": event_id,
-        "track_id": event.track_id,
-        "event_type": event.event_type,
-        "zone": event.zone,
-        "priority": priority,
-        "timestamp": timestamp
-    }
 
 
 @app.get("/events")
-def get_events():
+def get_events(
+    priority: Literal["low", "high"] | None = None,
+    event_type: Literal["person_detected", "restricted_zone_entry"] | None = None
+):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+
     try:
         rows = conn.execute(
-            "SELECT * FROM events ORDER BY id DESC LIMIT 100"
+            """
+            SELECT * FROM events
+            WHERE (? IS NULL OR priority = ?)
+            AND (? IS NULL OR event_type = ?)
+            ORDER BY id DESC
+            LIMIT 100
+            """,
+            (priority, priority, event_type, event_type)
         ).fetchall()
+
         return [dict(row) for row in rows]
+
     finally:
         conn.close()
+
