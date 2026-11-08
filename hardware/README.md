@@ -110,8 +110,12 @@ Run vision with tracking and strobe disabled:
 
 ```bash
 NIGHTSENTINEL_STROBE_ENABLED=0 \
+NIGHTSENTINEL_CAMERA_SOURCE=/dev/video1 \
 ./.venv/bin/python -B vision/detector.py
 ```
+
+The camera defaults to index `0`. Override it with a numeric index or stable
+device path when the C920 enumerates elsewhere, such as `/dev/video1`.
 
 Do not run the standalone serial bridge beside the detector. The detector uses
 the same bridge implementation and must be the sole owner of `/dev/ttyUSB0`

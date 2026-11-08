@@ -29,6 +29,12 @@ SERIAL_BAUD = int(os.getenv("NIGHTSENTINEL_SERIAL_BAUD", "9600"))
 SERVO_DIRECTION = int(os.getenv("NIGHTSENTINEL_SERVO_DIRECTION", "1"))
 STROBE_ENABLED = os.getenv("NIGHTSENTINEL_STROBE_ENABLED", "0") == "1"
 SHOW_PREVIEW = os.getenv("NIGHTSENTINEL_SHOW_PREVIEW", "0") == "1"
+CAMERA_SOURCE_VALUE = os.getenv("NIGHTSENTINEL_CAMERA_SOURCE", "0")
+CAMERA_SOURCE = (
+    int(CAMERA_SOURCE_VALUE)
+    if CAMERA_SOURCE_VALUE.isdigit()
+    else CAMERA_SOURCE_VALUE
+)
 
 CONFIRMATION_FRAMES = 3
 LOST_TARGET_FRAMES = 10
@@ -73,13 +79,14 @@ def main():
             return False
 
     print("[NightSentinel] Starting vision system...")
+    print(f"[NightSentinel] Camera source: {CAMERA_SOURCE}")
     print(
         "[NightSentinel] Strobe authorization is "
         f"{'ENABLED' if STROBE_ENABLED else 'DISABLED'}"
     )
 
     results = model.track(
-        source=0,
+        source=CAMERA_SOURCE,
         device=0,
         classes=[0],
         conf=0.5,
@@ -211,6 +218,9 @@ def main():
 
     except KeyboardInterrupt:
         print("\n[NightSentinel] Stopping vision system...")
+
+    except ConnectionError as error:
+        print(f"[CAMERA] Unable to start source {CAMERA_SOURCE}: {error}")
 
     finally:
         if bridge is not None:
