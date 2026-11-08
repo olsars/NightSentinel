@@ -37,16 +37,16 @@ def main():
     # tracker: ByteTrack tracking algorithm
     # persist=True: Keep tracker state across frames
     # stream=True: Process video frames continuously
-    # show=False: Don't open a graphical window
+    # show=True: Don't open a graphical window
     results = model.track(
         source=0,
         device=0,
         classes=[0],
-        conf=0.5,
-        tracker="bytetrack.yaml",
+        conf=0.2,
+        tracker="vision/botsort_reid.yaml",
         persist=True,
         stream=True,
-        show=False,
+        show=True,
         verbose=False,
     )
 
